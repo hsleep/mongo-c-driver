@@ -179,7 +179,7 @@ dynb = bsonEnv.SharedLibrary( "bson" , bSharedObjs )
 # ---- Install ----
 prefix = env.GetOption("prefix")
 
-env.Alias("install", env.Install(os.path.join(prefix, "lib"), [dynm[0] , dynb[0] ]))
+env.Alias("install", env.Install(os.path.join(prefix, "lib"), [dynm[0] , dynb[0], m[0], b[0] ]))
 env.Alias("install", env.Install(os.path.join(prefix, "include"), headers))
 
 env.Command("uninstall", None, Delete(FindInstalledFiles()))
