@@ -32,7 +32,7 @@ static const int zero = 0;
 /* Custom standard function pointers. */
 void *( *bson_malloc_func )( size_t ) = malloc;
 void *( *bson_realloc_func )( void *, size_t ) = realloc;
-void  ( *bson_free )( void * ) = free;
+void  ( *bson_free_func )( void * ) = free;
 #ifdef R_SAFETY_NET
 bson_printf_func bson_printf;
 #else
@@ -52,7 +52,7 @@ static int ( *oid_inc_func )( void )  = NULL;
    READING
    ------------------------------ */
 
-MONGO_EXPORT bson* bson_create() {
+MONGO_EXPORT bson* bson_create( void ) {
 	return (bson*)bson_malloc(sizeof(bson));
 }
 
@@ -71,7 +71,7 @@ MONGO_EXPORT bson *bson_empty( bson *obj ) {
 }
 
 MONGO_EXPORT int bson_copy( bson *out, const bson *in ) {
-    if ( !out ) return BSON_ERROR;
+    if ( !out || !in ) return BSON_ERROR;
     if ( !in->finished ) return BSON_ERROR;
     bson_init_size( out, bson_size( in ) );
     memcpy( out->data, in->data, bson_size( in ) );
@@ -116,48 +116,14 @@ MONGO_EXPORT const char *bson_data( const bson *b ) {
 }
 
 static char hexbyte( char hex ) {
-    switch ( hex ) {
-    case '0':
+    if (hex >= '0' && hex <= '9')
+        return (hex - '0');
+    else if (hex >= 'A' && hex <= 'F')
+        return (hex - 'A' + 10);
+    else if (hex >= 'a' && hex <= 'f')
+        return (hex - 'a' + 10);
+    else
         return 0x0;
-    case '1':
-        return 0x1;
-    case '2':
-        return 0x2;
-    case '3':
-        return 0x3;
-    case '4':
-        return 0x4;
-    case '5':
-        return 0x5;
-    case '6':
-        return 0x6;
-    case '7':
-        return 0x7;
-    case '8':
-        return 0x8;
-    case '9':
-        return 0x9;
-    case 'a':
-    case 'A':
-        return 0xa;
-    case 'b':
-    case 'B':
-        return 0xb;
-    case 'c':
-    case 'C':
-        return 0xc;
-    case 'd':
-    case 'D':
-        return 0xd;
-    case 'e':
-    case 'E':
-        return 0xe;
-    case 'f':
-    case 'F':
-        return 0xf;
-    default:
-        return 0x0; /* something smarter? */
-    }
 }
 
 MONGO_EXPORT void bson_oid_from_string( bson_oid_t *oid, const char *str ) {
@@ -276,10 +242,11 @@ MONGO_EXPORT void bson_print_raw( const char *data , int depth ) {
             break;
         case BSON_CODEWSCOPE:
             bson_printf( "BSON_CODE_W_SCOPE: %s", bson_iterator_code( &i ) );
-            bson_init( &scope );
+            /* bson_init( &scope ); */ /* review - stepped on by bson_iterator_code_scope? */
             bson_iterator_code_scope( &i, &scope );
             bson_printf( "\n\t SCOPE: " );
             bson_print( &scope );
+            /* bson_destroy( &scope ); */ /* review - causes free error */
             break;
         case BSON_INT:
             bson_printf( "%d" , bson_iterator_int( &i ) );
@@ -307,8 +274,8 @@ MONGO_EXPORT void bson_print_raw( const char *data , int depth ) {
    ITERATOR
    ------------------------------ */
 
-MONGO_EXPORT bson_iterator* bson_iterator_create() {
-    return (bson_iterator*)malloc(sizeof(bson_iterator*));
+MONGO_EXPORT bson_iterator* bson_iterator_create( void ) {
+    return ( bson_iterator* )malloc( sizeof( bson_iterator ) );
 }
 
 MONGO_EXPORT void bson_iterator_dispose(bson_iterator* i) {
@@ -815,8 +782,10 @@ MONGO_EXPORT int bson_append_code_n( bson *b, const char *name, const char *valu
 MONGO_EXPORT int bson_append_code_w_scope_n( bson *b, const char *name,
                                 const char *code, int len, const bson *scope ) {
 
-    int sl = len + 1;
-    int size = 4 + 4 + sl + bson_size( scope );
+    int sl, size;
+    if ( !scope ) return BSON_ERROR;
+    sl = len + 1;
+    size = 4 + 4 + sl + bson_size( scope );
     if ( bson_append_estart( b, BSON_CODEWSCOPE, name, size ) == BSON_ERROR )
         return BSON_ERROR;
     bson_append32( b, &size );
@@ -875,6 +844,7 @@ MONGO_EXPORT int bson_append_regex( bson *b, const char *name, const char *patte
 }
 
 MONGO_EXPORT int bson_append_bson( bson *b, const char *name, const bson *bson ) {
+    if ( !bson ) return BSON_ERROR;
     if ( bson_append_estart( b, BSON_OBJECT, name, bson_size( bson ) ) == BSON_ERROR )
         return BSON_ERROR;
     bson_append( b , bson->data , bson_size( bson ) );
@@ -971,6 +941,10 @@ MONGO_EXPORT bson_err_handler set_bson_err_handler( bson_err_handler func ) {
     bson_err_handler old = err_handler;
     err_handler = func;
     return old;
+}
+
+MONGO_EXPORT void bson_free( void *ptr ) {
+    bson_free_func( ptr );
 }
 
 MONGO_EXPORT void *bson_malloc( int size ) {

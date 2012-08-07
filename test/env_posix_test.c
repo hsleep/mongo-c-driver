@@ -34,12 +34,18 @@ int test_read_timeout( void ) {
 
     /* Set the connection timeout here. */
     mongo_set_op_timeout( conn, 1000 );
+    ASSERT( res == MONGO_OK );
 
     res = mongo_find_one( conn, "test.foo", &b, bson_empty(&fields), &out );
     ASSERT( res == MONGO_ERROR );
 
     ASSERT( conn->err == MONGO_IO_ERROR );
     ASSERT( strcmp( "Resource temporarily unavailable", conn->errstr ) == 0 );
+
+    bson_destroy( &obj );
+    bson_destroy( &b );
+
+    mongo_destroy( conn );
 
     return 0;
 }
@@ -86,6 +92,8 @@ int test_error_messages( void ) {
     ASSERT( mongo_insert( conn, ns, b, NULL ) != MONGO_OK );
     ASSERT( conn->err == MONGO_IO_ERROR );
     ASSERT( conn->errcode == ENOTSOCK );
+
+    bson_destroy( b );
 
     mongo_init( conn );
 

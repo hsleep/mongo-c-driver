@@ -26,8 +26,8 @@
 MONGO_EXTERN_C_START
 
 #define MONGO_MAJOR 0
-#define MONGO_MINOR 5
-#define MONGO_PATCH 2
+#define MONGO_MINOR 6
+#define MONGO_PATCH 0
 
 #define MONGO_OK 0
 #define MONGO_ERROR -1
@@ -85,6 +85,10 @@ enum mongo_update_opts {
     MONGO_UPDATE_UPSERT = 0x1,
     MONGO_UPDATE_MULTI = 0x2,
     MONGO_UPDATE_BASIC = 0x4
+};
+
+enum mongo_insert_opts {
+    MONGO_CONTINUE_ON_ERROR = 0x1
 };
 
 enum mongo_cursor_opts {
@@ -195,7 +199,7 @@ Connection API
 
 /** Initialize sockets for Windows.
  */
-MONGO_EXPORT void mongo_init_sockets();
+MONGO_EXPORT void mongo_init_sockets( void );
 
 /**
  * Initialize a new mongo connection object. You must initialize each mongo
@@ -377,12 +381,16 @@ MONGO_EXPORT int mongo_insert( mongo *conn, const char *ns, const bson *data,
  * @param num the number of documents in data.
  * @param custom_write_concern a write concern object that will
  *     override any write concern set on the conn object.
+ * @param flags flags on this batch insert. Currently, this value
+ *     may be 0 or MONGO_CONTINUE_ON_ERROR, which will cause the
+ *     batch insert to continue even if a given insert in the batch fails.
  *
  * @return MONGO_OK or MONGO_ERROR.
  *
  */
-MONGO_EXPORT int mongo_insert_batch( mongo *conn , const char *ns ,
-    const bson **data , int num, mongo_write_concern *custom_write_concern );
+MONGO_EXPORT int mongo_insert_batch( mongo *conn, const char *ns,
+    const bson **data, int num, mongo_write_concern *custom_write_concern,
+    int flags );
 
 /**
  * Update a document in a MongoDB server.
@@ -612,6 +620,21 @@ MONGO_EXPORT int mongo_create_index( mongo *conn, const char *ns,
     const bson *key, int options, bson *out );
 
 /**
+ * Create a capped collection.
+ *
+ * @param conn a mongo object.
+ * @param ns the namespace (e.g., "dbname.collectioname")
+ * @param size the size of the capped collection in bytes.
+ * @param max the max number of documents this collection is
+ *   allowed to contain. If zero, this argument will be ignored
+ *   and the server will use the collection's size to age document out.
+ *   If using this option, ensure that the total size can contain this
+ *   number of documents.
+ */
+MONGO_EXPORT int mongo_create_capped_collection( mongo *conn, const char *db,
+    const char *collection, int size, int max, bson *out );
+
+/**
  * Create an index with a single key.
  *
  * @param conn a mongo object.
@@ -622,7 +645,7 @@ MONGO_EXPORT int mongo_create_index( mongo *conn, const char *ns,
  *
  * @return true if the index was created.
  */
-bson_bool_t mongo_create_simple_index( mongo *conn, const char *ns,
+MONGO_EXPORT bson_bool_t mongo_create_simple_index( mongo *conn, const char *ns,
     const char *field, int options, bson *out );
 
 /**
@@ -765,7 +788,7 @@ MONGO_EXPORT void mongo_cmd_reset_error( mongo *conn, const char *db );
 Utility API
 **********************************************************************/
 
-MONGO_EXPORT mongo* mongo_create();
+MONGO_EXPORT mongo* mongo_create( void );
 MONGO_EXPORT void mongo_dispose(mongo* conn);
 MONGO_EXPORT int mongo_get_err(mongo* conn);
 MONGO_EXPORT int mongo_is_connected(mongo* conn);
@@ -774,7 +797,7 @@ MONGO_EXPORT const char* mongo_get_primary(mongo* conn);
 MONGO_EXPORT int mongo_get_socket(mongo* conn) ;
 MONGO_EXPORT int mongo_get_host_count(mongo* conn);
 MONGO_EXPORT const char* mongo_get_host(mongo* conn, int i);
-MONGO_EXPORT mongo_cursor* mongo_cursor_create();
+MONGO_EXPORT mongo_cursor* mongo_cursor_create( void );
 MONGO_EXPORT void mongo_cursor_dispose(mongo_cursor* cursor);
 MONGO_EXPORT int  mongo_get_server_err(mongo* conn);
 MONGO_EXPORT const char*  mongo_get_server_err_string(mongo* conn);

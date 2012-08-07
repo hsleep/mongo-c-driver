@@ -27,12 +27,14 @@ do
   esac
 done
 
-for i in `find . -name *_test`
+for i in `find . -name test_\*`
 do
   if [ $valgrind -eq 1 ]
   then
+    echo valgrind $i
     valgrind $i
   else
+    echo $i
     $i
   fi
 

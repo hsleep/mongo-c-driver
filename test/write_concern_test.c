@@ -6,22 +6,67 @@
 #include <string.h>
 #include <stdlib.h>
 
-
 /* TODO remove and add mongo_create_collection to the public API. */
 void create_capped_collection( mongo *conn ) {
-    bson b;
-
     mongo_cmd_drop_collection( conn, "test", "wc", NULL );
+    mongo_create_capped_collection( conn, "test", "wc", 1000000, 0, NULL );
+}
 
-    bson_init( &b );
-    bson_append_string( &b, "create", "wc" );
-    bson_append_bool( &b, "capped", 1 );
-    bson_append_int( &b, "size", 1000000 );
-    bson_finish( &b );
+void test_batch_insert_with_continue( mongo *conn ) {
+    bson *objs[5];
+    bson *objs2[5];
+    bson empty;
+    int i;
 
-    ASSERT( mongo_run_command( conn, "test", &b, NULL ) == MONGO_OK );
+    mongo_cmd_drop_collection( conn, TEST_DB, TEST_COL, NULL );
+    mongo_create_simple_index( conn, TEST_NS, "n", MONGO_INDEX_UNIQUE, NULL );
 
-    bson_destroy( &b );
+    for( i=0; i<5; i++ ) {
+        objs[i] = bson_malloc( sizeof( bson ) );
+        bson_init( objs[i] );
+        bson_append_int( objs[i], "n", i );
+        bson_finish( objs[i] );
+    }
+
+    ASSERT( mongo_insert_batch( conn, TEST_NS, (const bson **)objs, 5,
+        NULL, 0 ) == MONGO_OK );
+
+    ASSERT( mongo_count( conn, TEST_DB, TEST_COL,
+          bson_empty( &empty ) ) == 5 );
+
+    /* Add one duplicate value for n. */
+    objs2[0] = bson_malloc( sizeof( bson ) );
+    bson_init( objs2[0] );
+    bson_append_int( objs2[0], "n", 1 );
+    bson_finish( objs2[0] );
+
+    /* Add n for 6 - 9. */
+    for( i = 1; i < 5; i++ ) {
+        objs2[i] = bson_malloc( sizeof( bson ) );
+        bson_init( objs2[i] );
+        bson_append_int( objs2[i], "n", i + 5 );
+        bson_finish( objs2[i] );
+    }
+
+    /* Without continue on error, will fail immediately. */
+    ASSERT( mongo_insert_batch( conn, TEST_NS, (const bson **)objs2, 5,
+        NULL, 0 ) == MONGO_OK );
+    ASSERT( mongo_count( conn, TEST_DB, TEST_COL,
+          bson_empty( &empty ) ) == 5 );
+
+    /* With continue on error, will insert four documents. */
+    ASSERT( mongo_insert_batch( conn, TEST_NS, (const bson **)objs2, 5,
+        NULL, MONGO_CONTINUE_ON_ERROR ) == MONGO_OK );
+    ASSERT( mongo_count( conn, TEST_DB, TEST_COL,
+          bson_empty( &empty ) ) == 9 );
+
+    for( i=0; i<5; i++ ) {
+        bson_destroy( objs2[i] );
+        bson_free( objs2[i] );
+
+        bson_destroy( objs[i] );
+        bson_free( objs[i] );
+    }
 }
 
 /* We can test write concern for update
@@ -43,7 +88,7 @@ void test_update_and_remove( mongo *conn ) {
     }
 
     ASSERT( mongo_insert_batch( conn, "test.wc", (const bson **)objs, 5,
-        NULL ) == MONGO_OK );
+        NULL, 0 ) == MONGO_OK );
 
     ASSERT( mongo_count( conn, "test", "wc", bson_empty( &empty ) ) == 5 );
 
@@ -133,14 +178,27 @@ void test_write_concern_input( mongo *conn ) {
     conn->write_concern = NULL;
     mongo_write_concern_destroy( wc );
     mongo_write_concern_destroy( wcbad );
+    bson_destroy( b );
 }
 
 void test_insert( mongo *conn ) {
     mongo_write_concern wc[1];
-    bson b[1], b2[1], b3[1], empty[1];
+    bson b[1], b2[1], b3[1], b4[1], empty[1];
     bson *objs[2];
 
     mongo_cmd_drop_collection( conn, TEST_DB, TEST_COL, NULL );
+
+    mongo_write_concern_init( wc );
+    wc->w = 1;
+    mongo_write_concern_finish( wc );
+
+    bson_init( b4 );
+    bson_append_string( b4, "foo", "bar" );
+    bson_finish( b4 );
+
+    ASSERT( mongo_insert( conn, TEST_NS, b4, wc ) == MONGO_OK );
+
+    ASSERT( mongo_remove( conn, TEST_NS, bson_empty( empty ), wc ) == MONGO_OK );
 
     bson_init( b );
     bson_append_new_oid( b, "_id" );
@@ -150,10 +208,6 @@ void test_insert( mongo *conn ) {
 
     /* This fails but returns OK because it doesn't use a write concern. */
     ASSERT( mongo_insert( conn, TEST_NS, b, NULL ) == MONGO_OK );
-
-    mongo_write_concern_init( wc );
-    wc->w = 1;
-    mongo_write_concern_finish( wc );
 
     ASSERT( mongo_insert( conn, TEST_NS, b, wc ) == MONGO_ERROR );
     ASSERT( conn->err == MONGO_WRITE_ERROR );
@@ -188,23 +242,24 @@ void test_insert( mongo *conn ) {
     /* Insert two new documents by insert_batch. */
     conn->write_concern = NULL;
     ASSERT( mongo_count( conn, TEST_DB, TEST_COL, bson_empty( empty ) ) == 1 );
-    ASSERT( mongo_insert_batch( conn, TEST_NS, (const bson **)objs, 2, NULL ) == MONGO_OK );
+    ASSERT( mongo_insert_batch( conn, TEST_NS, (const bson **)objs, 2, NULL, 0 ) == MONGO_OK );
     ASSERT( mongo_count( conn, TEST_DB, TEST_COL, bson_empty( empty ) ) == 3 );
 
     /* This should definitely fail if we try again with write concern. */
     mongo_clear_errors( conn );
-    ASSERT( mongo_insert_batch( conn, TEST_NS, (const bson **)objs, 2, wc ) == MONGO_ERROR );
+    ASSERT( mongo_insert_batch( conn, TEST_NS, (const bson **)objs, 2, wc, 0 ) == MONGO_ERROR );
     ASSERT( conn->err == MONGO_WRITE_ERROR );
     ASSERT_EQUAL_STRINGS( conn->errstr, "See conn->lasterrstr for details." );
     ASSERT_EQUAL_STRINGS( conn->lasterrstr, "E11000 duplicate key error index" );
     ASSERT( conn->lasterrcode == 11000 );
 
     /* But it will succeed without the write concern set. */
-    ASSERT( mongo_insert_batch( conn, TEST_NS, (const bson **)objs, 2, NULL ) == MONGO_OK );
+    ASSERT( mongo_insert_batch( conn, TEST_NS, (const bson **)objs, 2, NULL, 0 ) == MONGO_OK );
 
     bson_destroy( b );
     bson_destroy( b2 );
     bson_destroy( b3 );
+    bson_destroy( b4 );
     mongo_write_concern_destroy( wc );
 }
 
@@ -223,6 +278,7 @@ int main() {
     if( mongo_get_server_version( version ) != -1 && version[0] != '1' ) {
         test_write_concern_input( conn );
         test_update_and_remove( conn );
+        test_batch_insert_with_continue( conn );
     }
 
     mongo_destroy( conn );
